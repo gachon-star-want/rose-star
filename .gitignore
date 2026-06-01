@@ -1,0 +1,20 @@
+# 빌드 중간 산출물
+build/*
+!build/.gitkeep
+
+# 최종 산출물(릴리즈 시 별도 관리) — 생성 exe/이미지는 추적하지 않음
+dist/*.exe
+dist/*.bmp
+share/
+
+# 프로젝트 로컬 FASM 툴체인 바이너리(머신별·대용량, 최종 제출 제외)
+tools/toolchain/fasm
+tools/toolchain/fasm.exe
+tools/toolchain/*.bin
+
+# 로컬 전용 Claude 설정(공유 settings.json은 추적)
+.claude/settings.local.json
+
+# OS/에디터 잡음
+.DS_Store
+*.swp

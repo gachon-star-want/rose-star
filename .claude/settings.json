@@ -1,0 +1,10 @@
+{
+  "tools": [
+    {
+      "type": "advisor_20260301",
+      "name": "advisor",
+      "model": "claude-opus-4-7",
+      "max_uses": 3
+    }
+  ]
+}
