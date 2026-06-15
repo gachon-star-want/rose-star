@@ -26,6 +26,12 @@ WIN_EXPECT = {
     "1-3": {"game_state": GS_WON, "petals": 5, "starlight": 12, "active_count": 0, "to_spawn": 0},
     "1-4": {"game_state": GS_WON, "petals": 5, "starlight": 19, "active_count": 0, "to_spawn": 0},
     "1-5": {"game_state": GS_WON, "petals": 5, "starlight": 21, "active_count": 0, "to_spawn": 0},
+    "1-6": {"game_state": GS_WON, "petals": 5, "starlight": 21, "active_count": 0, "to_spawn": 0},
+    "1-7": {"game_state": GS_WON, "petals": 5, "starlight": 30, "active_count": 0, "to_spawn": 0},
+    "1-8": {"game_state": GS_WON, "petals": 5, "starlight": 50, "active_count": 0, "to_spawn": 0},
+    "1-9": {"game_state": GS_WON, "petals": 5, "starlight": 44, "active_count": 0, "to_spawn": 0},
+    "1-10": {"game_state": GS_WON, "petals": 5, "starlight": 30, "active_count": 0, "to_spawn": 0},
+    "1-11": {"game_state": GS_WON, "petals": 5, "starlight": 67, "active_count": 0, "to_spawn": 0},
     # 달2 (harness 결과 기준 — 스테이지별 배치/경제에 따라 다름)
     "2-1": {"game_state": GS_WON, "petals": None, "starlight": None, "active_count": 0, "to_spawn": 0},
     "2-2": {"game_state": GS_WON, "petals": None, "starlight": None, "active_count": 0, "to_spawn": 0},

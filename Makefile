@@ -15,7 +15,8 @@ SRC_MAIN   := src/main.asm
 FASM       := ./tools/toolchain/fasm-docker.sh
 
 .PHONY: all toolchain-check build smoke render-test render-test-loss \
-        harness-1-2 harness-1-3 harness-1-4 harness-1-5 harness-moon1 \
+        harness-1-2 harness-1-3 harness-1-4 harness-1-5 \
+        harness-moon1 harness-moon2 harness-moon3 harness-moon4 harness-all \
         harness-code harness-speed \
         harness-aura harness-boost harness-boost-cd harness-callwave \
         harness-boss harness-slow harness-mech \
@@ -109,7 +110,14 @@ harness-1-5: toolchain-check
 	@echo "[harness-1-5] OK"
 
 harness-moon1: render-test harness-1-2 harness-1-3 harness-1-4 harness-1-5
-	@echo "[harness-moon1] 달1 전체 (1-1~1-5) LOCKED"
+	@mkdir -p build
+	@$(call HARNESS_CMD,1_6,1-6)
+	@$(call HARNESS_CMD,1_7,1-7)
+	@$(call HARNESS_CMD,1_8,1-8)
+	@$(call HARNESS_CMD,1_9,1-9)
+	@$(call HARNESS_CMD,1_10,1-10)
+	@$(call HARNESS_CMD,1_11,1-11)
+	@echo "[harness-moon1] 달1 전체 (1-1~1-11) LOCKED"
 
 harness-speed: toolchain-check
 	@mkdir -p build

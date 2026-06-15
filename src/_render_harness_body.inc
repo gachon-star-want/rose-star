@@ -128,6 +128,30 @@ if SCENARIO = 0
         place   3, 4
         place   9, 4
         place   12, 8
+  else if LEVEL_IDX = 5  ; 1-6 T1 LOWLINE(row9) 뱀×4 — 양 3마리 row7
+        place   3, 7
+        place   8, 7
+        place   13, 7
+  else if LEVEL_IDX = 6  ; 1-7 T2 LCORNER 싹×8+뱀×3
+        place   4, 5
+        place   9, 5
+        place   12, 7
+  else if LEVEL_IDX = 7  ; 1-8 T3 SCURVE 싹×12+뱀×2
+        place   3, 5
+        place   6, 5
+        place   11, 6
+  else if LEVEL_IDX = 8  ; 1-9 T5 SWITCHBACK 싹×14
+        place   4, 3
+        place   10, 3
+        place   7, 6
+  else if LEVEL_IDX = 9  ; 1-10 T2 HALF(빌드존1) 싹×12+뱀×2
+        place   3, 5
+        place   6, 5
+        place   8, 5
+  else if LEVEL_IDX = 10  ; 1-11 T3 SCURVE 싹×10+뱀×4+싹×6
+        place   3, 5
+        place   6, 5
+        place   11, 6
   else if LEVEL_IDX = 11  ; 2-1 T0 새싹×8
         ; 화산(range=2) col5 row4, 가로등(range=4) col11 row4
         place_t TW_VOLCANO, 5, 4
