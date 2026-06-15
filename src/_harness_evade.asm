@@ -70,6 +70,7 @@ segment readable writeable
   petals       dd ?
   game_state   dd ?
   statebuf     rd 6
+  gen_buf      rb 192
 
 LAMP_IDX = 5 * GRID_COLS + 5   ; (col5, row5) = 85
 

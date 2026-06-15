@@ -72,6 +72,7 @@ segment readable writeable
   petals       dd ?
   game_state   dd ?
   statebuf     rd 6
+  gen_buf      rb 192
 
 FOX_IDX   = 5 * GRID_COLS + 5    ; (col5, row5) = 85
 SHEEP_IDX = 5 * GRID_COLS + 6    ; (col6, row5) = 86  체비셰프=1 ≤ 1 → boosted

@@ -640,6 +640,142 @@ proc init_level uses eax ebx ecx edx esi edi, level_idx
         ret
 endp
 
+; ── 보너스 모드 (Endless / Random) ──────────────────────
+; Random 템플릿 소스: 경로 T0~T5 한 개씩의 레벨 인덱스 (geometry 재사용 → 솔버빌리티 보장)
+rand_tpl_table:
+    dd 0, 5, 2, 7, 15, 8          ; T0=1-1, T1=1-6, T2=1-3, T3=1-8, T4=2-5, T5=1-9
+
+; prng_next → eax (xorshift32, prng_state 갱신). gen/보너스 모드용.
+proc prng_next uses ecx
+        mov     eax, [prng_state]
+        mov     ecx, eax
+        shl     ecx, 13
+        xor     eax, ecx
+        mov     ecx, eax
+        shr     ecx, 17
+        xor     eax, ecx
+        mov     ecx, eax
+        shl     ecx, 5
+        xor     eax, ecx
+        mov     [prng_state], eax
+        ret
+endp
+
+; gen_endless_wave(w): 엔들리스 라운드 w 웨이브 큐만 설정 (타워/경제/꽃잎 유지).
+;   타입·수·간격이 w로 escalate → 결국 DPS 한계로 불가피한 죽음(점수전). 단일 웨이브.
+proc gen_endless_wave uses eax ebx ecx, w
+        mov     ecx, [w]
+        mov     eax, EN_SPROUT
+        cmp     ecx, 5
+        jle     .ts
+        mov     eax, EN_SEEDLING
+        cmp     ecx, 12
+        jle     .ts
+        mov     eax, EN_SAPLING
+        cmp     ecx, 20
+        jle     .ts
+        mov     eax, EN_TREE
+  .ts:
+        mov     [wave_types], al
+        ; count = min(14, 5 + w)
+        mov     eax, ecx
+        add     eax, 5
+        cmp     eax, 14
+        jle     @f
+        mov     eax, 14
+  @@:
+        mov     [wave_counts], al
+        movzx   ebx, al
+        mov     [to_spawn], ebx
+        ; spacing = max(22, 50 - w)
+        mov     eax, 50
+        sub     eax, ecx
+        cmp     eax, 22
+        jge     @f
+        mov     eax, 22
+  @@:
+        mov     [wave_spacings], al
+        mov     dword [wave_delays], 30
+        mov     dword [wave_total], 1
+        mov     dword [wave_cur], 0
+        mov     [wave_pending], ebx
+        mov     dword [wave_scd], 30
+        ret
+endp
+
+; gen_random(seed): 무작위 템플릿(경로/빌드존) + 무작위 웨이브를 gen_buf에 작성.
+;   이후 호출측이 init_level(44)로 로드. 템플릿 재사용이라 솔버빌리티 보장(ship-once 안전).
+proc gen_random uses eax ebx ecx edx esi edi, seed
+        mov     eax, [seed]
+        or      eax, 1
+        mov     [prng_state], eax
+        ; 템플릿 idx = prng % 6
+        call    prng_next
+        xor     edx, edx
+        mov     ecx, 6
+        div     ecx
+        mov     eax, [rand_tpl_table + edx*4]   ; src 레벨 인덱스
+        mov     esi, [level_table + eax*4]      ; src 레벨 데이터
+        movzx   ebx, byte [esi+3]               ; path_count
+        movzx   ecx, byte [esi+4]               ; build_count
+        ; gen_buf 헤더
+        mov     edi, gen_buf
+        mov     byte [edi], 0x3E                ; 모든 타워 해금
+        mov     byte [edi+1], 130               ; start_light
+        mov     byte [edi+2], 5                 ; petals
+        mov     [edi+3], bl                     ; path_count
+        mov     [edi+4], cl                     ; build_count
+        mov     byte [edi+5], 2                 ; wave_count = 2
+        mov     byte [edi+6], 0
+        ; path+build 복사: src+7 → gen_buf+7, (pc+bc)*4 바이트
+        lea     edx, [ebx + ecx]
+        shl     edx, 2                          ; (pc+bc)*4
+        lea     esi, [esi+7]
+        lea     edi, [edi+7]
+  .cp:
+        test    edx, edx
+        jz      .cpdone
+        mov     al, [esi]
+        mov     [edi], al
+        inc     esi
+        inc     edi
+        dec     edx
+        jmp     .cp
+  .cpdone:
+        ; edi → 웨이브 시작. 2개 웨이브 생성 (전 적 풀에서 무작위)
+        ; wave0: type=1+prng%8, count=6+prng%6, sp=40, delay=0
+        call    prng_next
+        xor     edx, edx
+        mov     ecx, 8
+        div     ecx
+        inc     edx                             ; 1..8
+        mov     [edi], dl
+        call    prng_next
+        xor     edx, edx
+        mov     ecx, 6
+        div     ecx
+        add     edx, 6                          ; 6..11
+        mov     [edi+1], dl
+        mov     byte [edi+2], 40
+        mov     word [edi+3], 0
+        ; wave1: type=1+prng%8, count=4+prng%4, sp=48, delay=200
+        call    prng_next
+        xor     edx, edx
+        mov     ecx, 8
+        div     ecx
+        inc     edx
+        mov     [edi+5], dl
+        call    prng_next
+        xor     edx, edx
+        mov     ecx, 4
+        div     ecx
+        add     edx, 4                          ; 4..7
+        mov     [edi+6], dl
+        mov     byte [edi+7], 48
+        mov     word [edi+8], 200
+        ret
+endp
+
 ; place_tower(ttype, cx, cy) — 타입 지정 설치 (하네스 매크로 + 게임 내부용)
 proc place_tower uses eax ecx edx, ttype, cx, cy
         mov     eax, [cx]

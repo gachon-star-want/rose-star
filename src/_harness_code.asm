@@ -68,6 +68,7 @@ segment readable writeable
   petals       dd ?
   game_state   dd ?
   statebuf     rd 6
+  gen_buf      rb 192
 
 segment readable executable
 include 'game.inc'

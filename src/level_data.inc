@@ -561,3 +561,17 @@ level_table:
     dd level_4_1,  level_4_2,  level_4_3,  level_4_4
     dd level_4_5,  level_4_6,  level_4_7,  level_4_8
     dd level_4_9,  level_4_10, level_4_11
+    dd gen_buf                              ; [44] = Random 모드 생성 버퍼
+    dd endless_base_level                   ; [45] = Endless 고정 맵(T5)
+
+; Endless 고정 맵: T5 SWITCHBACK, 모든 타워 해금, 시작 80. 첫 웨이브는 gen_endless_wave로 교체.
+endless_base_level:
+    db 0x3E, 80, 5, 5, 2, 1, 0
+    db 0, 2, 15, 0
+    db 14, 2, 4, 1
+    db 14, 5, 14, 2
+    db 1, 5, 4, 1
+    db 1, 8, 15, 0
+    db 3, 3, 9, 2
+    db 3, 6, 9, 2
+    WDEF EN_SPROUT, 6, 48, 30               ; placeholder (gen_endless_wave가 덮어씀)

@@ -140,6 +140,11 @@ CLICK_SHIFT    = 6
   cur_level_idx dd 0
   cur_level_mask dd 0            ; 현재 해넘이 tower_mask (타워 선택 게이팅)
   story_id      dd 0            ; 현재 서사 장면 (0=도입 1~3=막간 4=엔딩승 5=엔딩패)
+  game_kind     dd 0            ; 0=캠페인 1=점등인의 별(Endless) 2=사막의 신기루(Random)
+  endless_wave  dd 0            ; Endless 현재 라운드 = 점수
+  unlock_endless dd 0           ; 2-11 클리어 시 1
+  unlock_random  dd 0           ; 3-11 클리어 시 1
+  gen_buf      rb 192
   share_dir    db 'share', 0
   fmt_filepath db 'share/%s.bmp', 0
   share_filepath db 128 dup(0)
@@ -177,6 +182,16 @@ CLICK_SHIFT    = 6
   card_str_save_fail:
       db 11
       dw 0xCE74, 0xB4DC, 0xB97C, 0x0020, 0xB0A8, 0xAE30, 0xC9C0, 0x0020, 0xBABB, 0xD588, 0xB2E4
+  str_endless:                              ; 점등인의 별
+      db 6
+      dw 0xC810, 0xB4F1, 0xC778, 0xC758, 0x0020, 0xBCC4
+  str_random:                               ; 사막의 신기루
+      db 7
+      dw 0xC0AC, 0xB9C9, 0xC758, 0x0020, 0xC2E0, 0xAE30, 0xB8E8
+  str_ke:  db 3
+      dw 0x005B, 0x0045, 0x005D            ; [E]
+  str_kd:  db 3
+      dw 0x005B, 0x0044, 0x005D            ; [D]
   card_buffer rb 480 * 480 * 3
 
 
@@ -265,6 +280,7 @@ start:
         call    apply_easy_income
   .one_tick:
   .skip_update:
+        call    endless_refill         ; Endless: WON이면 다음 라운드로 (점수 누적)
         stdcall render_world
         stdcall draw_overlays          ; 타워 팔레트 잠금/비용 + 타이틀 모드
         ; 일시정지 오버레이
@@ -826,6 +842,7 @@ endp
 ; ── 레벨 진입: init_level + tower_mask 로드 + 기본 타워 선택 ──
 ; 해넘이를 시작할 땐 항상 이 래퍼를 거친다(하네스는 init_level 직접 호출).
 proc enter_level uses esi, idx
+        mov     dword [game_kind], 0           ; 캠페인
         mov     eax, [idx]
         mov     [cur_level_idx], eax
         stdcall init_level, eax
@@ -942,6 +959,42 @@ proc advance_after_story
         ret
 endp
 
+; ── 보너스 모드 진입/리필 ──
+; Endless(점등인의 별): T5 고정 맵 + 무한 escalate 웨이브, 점수=라운드.
+proc enter_endless
+        mov     dword [game_kind], 1
+        mov     dword [endless_wave], 1
+        mov     dword [game_mode], 1            ; Hard 경제(초당 0)
+        stdcall init_level, 45
+        stdcall gen_endless_wave, 1
+        mov     dword [game_state], GS_PLAY
+        ret
+endp
+
+; Random(사막의 신기루): 무작위 템플릿 맵 1판. 시드=GetTickCount(매번 다름).
+proc enter_random
+        mov     dword [game_kind], 2
+        mov     dword [game_mode], 1
+        invoke  GetTickCount
+        stdcall gen_random, eax
+        stdcall init_level, 44                  ; gen_buf 로드
+        mov     dword [game_state], GS_PLAY
+        ret
+endp
+
+; Endless WON → 다음 라운드 생성(타워/경제/꽃잎 유지). 프레임 루프에서 매 프레임 호출.
+proc endless_refill
+        cmp     dword [game_kind], 1
+        jne     .ret
+        cmp     dword [game_state], GS_WON
+        jne     .ret
+        inc     dword [endless_wave]
+        stdcall gen_endless_wave, [endless_wave]
+        mov     dword [game_state], GS_PLAY
+  .ret:
+        ret
+endp
+
 ; render_world 위에 그리는 플랫폼 오버레이:
 ;   GS_PLAY/PAUSE → 잠긴 타워 칩 덧칠(cur_level_mask) + 선택 타워 비용(HUD 빈칸)
 ;   GS_TITLE      → 쉬움/어려움 모드 선택 표시
@@ -983,6 +1036,13 @@ proc draw_overlays uses eax ecx edx
         movzx   eax, word [tower_def_table + eax]
         stdcall num_to_u16, eax
         stdcall draw_hud_text, num_buf, eax, 128, 2, C_STAR
+        ; Endless: 라운드(점수) 하단 표시
+        cmp     dword [game_kind], 1
+        jne     .ovl_done
+        stdcall draw_hud_text, str_wave+1, 3, 96, 178, C_STAR
+        stdcall num_to_u16, [endless_wave]
+        stdcall draw_hud_text, num_buf, eax, 132, 178, C_STAR
+  .ovl_done:
         ret
   .title:
         ; 쉬움 / 어려움 — 선택 모드 강조
@@ -990,10 +1050,22 @@ proc draw_overlays uses eax ecx edx
         jne     .t_hard
         stdcall draw_hud_text, card_str_easy+1, 2, 88, 128, C_WIN
         stdcall draw_hud_text, card_str_hard+1, 3, 132, 128, C_TEXT_DIM
-        ret
+        jmp     .t_bonus
   .t_hard:
         stdcall draw_hud_text, card_str_easy+1, 2, 88, 128, C_TEXT_DIM
         stdcall draw_hud_text, card_str_hard+1, 3, 132, 128, C_WIN
+  .t_bonus:
+        ; 해금된 보너스 모드 표시
+        cmp     dword [unlock_endless], 0
+        je      .t_chkrandom
+        stdcall draw_hud_text, str_endless+1, 6, 56, 150, C_STAR
+        stdcall draw_hud_text, str_ke+1, 3, 188, 150, C_TEXT_DIM
+  .t_chkrandom:
+        cmp     dword [unlock_random], 0
+        je      .t_done
+        stdcall draw_hud_text, str_random+1, 7, 48, 166, C_STAR
+        stdcall draw_hud_text, str_kd+1, 3, 188, 166, C_TEXT_DIM
+  .t_done:
         ret
 endp
 
@@ -1129,6 +1201,10 @@ proc WindowProc, hw, wmsg, wparam, lparam
         je      .kcallwave
         cmp     eax, 'M'
         je      .kmute
+        cmp     eax, 'E'
+        je      .kendless
+        cmp     eax, 'D'
+        je      .krandom
         cmp     eax, VK_TAB
         je      .ktab
         cmp     eax, '1'
@@ -1141,6 +1217,21 @@ proc WindowProc, hw, wmsg, wparam, lparam
         jmp     .zero
   .ktab:
         call    cycle_tower
+        jmp     .zero
+  .kendless:
+        ; 타이틀 + Endless 해금 시 진입
+        cmp     dword [game_state], GS_TITLE
+        jne     .zero
+        cmp     dword [unlock_endless], 0
+        je      .zero
+        call    enter_endless
+        jmp     .zero
+  .krandom:
+        cmp     dword [game_state], GS_TITLE
+        jne     .zero
+        cmp     dword [unlock_random], 0
+        je      .zero
+        call    enter_random
         jmp     .zero
   .kstory:
         cmp     eax, VK_ESCAPE
@@ -1189,7 +1280,14 @@ proc WindowProc, hw, wmsg, wparam, lparam
         ; 타이틀 화면에서는 R 무시
         cmp     dword [game_state], GS_TITLE
         je      .zero
+        ; 보너스 모드에서 R → 타이틀로 (캠페인 레벨로 새지 않게)
+        cmp     dword [game_kind], 0
+        jne     .krestart_totitle
         stdcall enter_level, [cur_level_idx]
+        jmp     .zero
+  .krestart_totitle:
+        mov     dword [game_kind], 0
+        mov     dword [game_state], GS_TITLE
         jmp     .zero
   .kpause:
         ; [P]: GS_PLAY↔GS_PAUSE 토글
@@ -1258,6 +1356,9 @@ proc WindowProc, hw, wmsg, wparam, lparam
         ; GS_WON → 막간/엔딩 분기 또는 다음 해넘이
         cmp     dword [game_state], GS_WON
         jne     .kplace_notwon
+        ; 보너스 모드(Random) WON → 타이틀로
+        cmp     dword [game_kind], 0
+        jne     .kplace_totitle
         mov     eax, [cur_level_idx]
         cmp     eax, 43
         jge     .kplace_endgame                 ; 4-11 → 엔딩
@@ -1270,6 +1371,10 @@ proc WindowProc, hw, wmsg, wparam, lparam
         inc     dword [cur_level_idx]
         stdcall enter_level, [cur_level_idx]
         jmp     .zero
+  .kplace_totitle:
+        mov     dword [game_kind], 0
+        mov     dword [game_state], GS_TITLE
+        jmp     .zero
   .kplace_endgame:
         stdcall enter_story, 4                  ; 승리 엔딩
         jmp     .zero
@@ -1277,9 +1382,11 @@ proc WindowProc, hw, wmsg, wparam, lparam
         stdcall enter_story, 1
         jmp     .zero
   .kplace_inter2:
+        mov     dword [unlock_endless], 1       ; 2-11 클리어 → Endless 해금
         stdcall enter_story, 2
         jmp     .zero
   .kplace_inter3:
+        mov     dword [unlock_random], 1        ; 3-11 클리어 → Random 해금
         stdcall enter_story, 3
         jmp     .zero
   .kplace_notwon:
