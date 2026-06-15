@@ -155,9 +155,24 @@ tower_def_table:
     dw 50
     db 0,  0, 1, TOWER_BOOST                                    ; TW_FOX     idx4
 
-; 타워 종류별 렌더 색 (idx = TW_*-1). Phase 2에서 스프라이트로 교체.
+; 타워 종류별 렌더 색 (idx = TW_*-1). HUD 팔레트 칩 색으로 사용.
 tower_color_table:
     dd C_SHEEP, C_VOLCANO, C_LAMP, C_WIND, C_FOX
+
+; ── 스프라이트 데이터 (cast24 PNG → 자동 생성) ──
+include 'sprites.inc'
+
+; type → 스프라이트/팔레트 포인터 (idx = EN_*-1 / TW_*-1)
+enemy_spr_table:
+    dd spr_sprout, spr_seedling, spr_sapling, spr_giant
+    dd spr_snake, spr_vain, spr_biz, spr_drunk, spr_giant   ; idx8 = 보스(거목 재사용)
+enemy_pal_table:
+    dd pal_sprout, pal_seedling, pal_sapling, pal_giant
+    dd pal_snake, pal_vain, pal_biz, pal_drunk, pal_giant
+tower_spr_table:
+    dd spr_sheep, spr_volcano, spr_lamp, spr_wind, spr_fox
+tower_pal_table:
+    dd pal_sheep, pal_volcano, pal_lamp, pal_wind, pal_fox
 
 ; ─────────────────────────────────────────────────────
 
@@ -177,6 +192,82 @@ proc fill_rect uses esi edi ebx, px,py,pw,ph,col
         add     ebx, [ph]
         cmp     esi, ebx
         jl      @b
+        ret
+endp
+
+; plot_px(px,py,col): 경계 검사 후 프레임버퍼에 1픽셀. (blit_sprite 전용)
+proc plot_px uses eax edx, px, py, col
+        mov     eax, [px]
+        test    eax, eax
+        js      .skip
+        cmp     eax, FB_W
+        jge     .skip
+        mov     edx, [py]
+        test    edx, edx
+        js      .skip
+        cmp     edx, FB_H
+        jge     .skip
+        imul    edx, FB_W
+        add     edx, eax
+        mov     eax, [col]
+        mov     [framebuffer + edx*4], eax
+  .skip:
+        ret
+endp
+
+; blit_sprite(spr, pal, dx, dy, w, h): 4bpp 인덱스 스프라이트 blit (idx0=투명, 경계 클립).
+;   바이트 = (왼픽셀<<4)|오른픽셀. 색 = pal[idx]. docs/18 §4.
+;   sx/sy는 proc 지역변수(공유 temp r_* 와 무관) → draw 루프 카운터와 충돌 없음.
+;   모든 레지스터를 uses로 보존 → 호출측 루프 카운터(esi 등) 안전.
+proc blit_sprite uses eax ebx ecx edx esi edi, spr, pal, dx, dy, w, h
+        locals
+          sx dd ?
+          sy dd ?
+        endl
+        mov     esi, [spr]
+        mov     edi, [pal]
+        mov     dword [sy], 0
+  .row:
+        mov     eax, [sy]
+        cmp     eax, [h]
+        jge     .done
+        mov     dword [sx], 0
+  .col:
+        mov     eax, [sx]
+        cmp     eax, [w]
+        jge     .rownext
+        movzx   ebx, byte [esi]
+        inc     esi
+        ; 왼쪽 픽셀 = 상위 니블
+        mov     ecx, ebx
+        shr     ecx, 4
+        test    ecx, ecx
+        jz      .right
+        mov     eax, [edi + ecx*4]
+        mov     ecx, [sx]
+        add     ecx, [dx]
+        mov     edx, [sy]
+        add     edx, [dy]
+        stdcall plot_px, ecx, edx, eax
+  .right:
+        mov     ecx, ebx
+        and     ecx, 0Fh
+        test    ecx, ecx
+        jz      .colnext
+        mov     eax, [edi + ecx*4]
+        mov     ecx, [sx]
+        add     ecx, [dx]
+        inc     ecx
+        mov     edx, [sy]
+        add     edx, [dy]
+        stdcall plot_px, ecx, edx, eax
+  .colnext:
+        add     dword [sx], 2
+        jmp     .col
+  .rownext:
+        inc     dword [sy]
+        jmp     .row
+  .done:
         ret
 endp
 
@@ -1779,7 +1870,15 @@ proc draw_tiles uses eax ebx
         stdcall fill_rect, [r_px], [r_py], TILE, TILE, C_PATH
         jmp     .next
   .rose:
-        stdcall fill_rect, [r_px], [r_py], TILE, TILE, C_ROSE
+        ; 장미는 경로 끝에 선다: 바닥은 path 색, 그 위 24px 장미 스프라이트(아래중앙 앵커)
+        stdcall fill_rect, [r_px], [r_py], TILE, TILE, C_PATH
+        mov     eax, [r_px]
+        sub     eax, 4
+        mov     [r_tx], eax
+        mov     eax, [r_py]
+        sub     eax, 8
+        mov     [r_ty], eax
+        stdcall blit_sprite, spr_rose, pal_rose, [r_tx], [r_ty], 24, 24
         jmp     .next
   .bz:
         stdcall fill_rect, [r_px], [r_py], TILE, TILE, C_BUILDE
@@ -1802,7 +1901,7 @@ proc draw_tiles uses eax ebx
         ret
 endp
 
-; tower_grid → 종류별 색 사각형 (빌드존 안쪽 10×10). 색=tower_color_table[type-1].
+; tower_grid → 종류별 24px 스프라이트 (아래중앙 앵커). spr/pal = tower_*_table[type-1].
 proc draw_towers uses eax ebx
         mov     dword [r_cy], 0
   .yl:
@@ -1814,19 +1913,21 @@ proc draw_towers uses eax ebx
         movzx   ebx, byte [tower_grid + eax]
         cmp     ebx, TW_NONE
         je      .next
-        ; 색 = tower_color_table[type-1]
-        dec     ebx
-        mov     ebx, [tower_color_table + ebx*4]
-        mov     [r_ty], ebx
+        dec     ebx                            ; type-1
+        mov     eax, [tower_spr_table + ebx*4]
+        mov     [r_tx], eax
+        mov     eax, [tower_pal_table + ebx*4]
+        mov     [r_ty], eax
+        ; 아래중앙 앵커: base_x = cx*16+8-12, base_y = cy*16+16-24
         mov     eax, [r_cx]
         shl     eax, 4
-        add     eax, 3
+        sub     eax, 4
         mov     [r_px], eax
         mov     eax, [r_cy]
         shl     eax, 4
-        add     eax, 3
+        sub     eax, 8
         mov     [r_py], eax
-        stdcall fill_rect, [r_px], [r_py], 10, 10, [r_ty]
+        stdcall blit_sprite, [r_tx], [r_ty], [r_px], [r_py], 24, 24
   .next:
         inc     dword [r_cx]
         mov     eax, [r_cx]
@@ -1842,20 +1943,27 @@ endp
 ; 활성 적 → 6×6 연두 사각형 (en_x, en_y 기반).
 ; 주의: 루프 카운터는 esi 사용 — fill_rect가 ecx를 rep stosd로 파괴하므로
 ; ecx를 카운터로 쓰면 활성 적에서 무한루프(esi/edi/ebx는 fill_rect가 보존).
-proc draw_enemies uses eax esi
+proc draw_enemies uses eax ebx esi
         xor     esi, esi
   .l:
         cmp     esi, MAX_ENEMIES
         jge     .done
         cmp     byte [en_active + esi], 0
         je      .next
+        movzx   ebx, byte [en_type + esi]
+        dec     ebx                            ; type-1
+        mov     eax, [enemy_spr_table + ebx*4]
+        mov     [r_tx], eax
+        mov     eax, [enemy_pal_table + ebx*4]
+        mov     [r_ty], eax
+        ; 아래중앙 앵커: base_x = en_x-12, base_y = en_y-16
         mov     eax, [en_x + esi*4]
-        sub     eax, 3
+        sub     eax, 12
         mov     [r_px], eax
         mov     eax, [en_y + esi*4]
-        sub     eax, 3
+        sub     eax, 16
         mov     [r_py], eax
-        stdcall fill_rect, [r_px], [r_py], 6, 6, C_SPROUT
+        stdcall blit_sprite, [r_tx], [r_ty], [r_px], [r_py], 24, 24
   .next:
         inc     esi
         jmp     .l
