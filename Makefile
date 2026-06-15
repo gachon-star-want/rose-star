@@ -21,7 +21,7 @@ FASM       := ./tools/toolchain/fasm-docker.sh
         harness-aura harness-boost harness-boost-cd harness-callwave \
         harness-boss harness-slow harness-mech \
         harness-evade harness-erratic harness-boss-cascade \
-        size clean release-check help
+        release size clean release-check help
 
 help:
 	@echo "어린왕자: 장미의 별 — 빌드 명령"
@@ -29,7 +29,10 @@ help:
 	@echo "  make smoke             FASM이 유효한 Windows PE를 방출하는지 검증"
 	@echo "  make render-test       WIN 시나리오 헤드리스 실행 → 상태단언 + build/render-test.png"
 	@echo "  make render-test-loss  LOSS 시나리오 헤드리스 실행 → 상태단언 + build/render-loss.png"
-	@echo "  make build             $(EXE) 빌드 (FASM 필요)"
+	@echo "  make build             $(EXE) 빌드 (FASM 필요, 패딩 없음)"
+	@echo "  make release           빌드 + exact-fill 패딩 → 정확히 $(DIST_LIMIT) B 제출물"
+	@echo "  make harness-all       44해넘이 전체 Hard 클리어 검증"
+	@echo "  make harness-mech      전투 메커닉 10종 검증"
 	@echo "  make size              dist/ 총 바이트를 $(DIST_LIMIT) 와 비교"
 	@echo "  make release-check     exact-fill( == $(DIST_LIMIT) ) 검증"
 	@echo "  make clean             build/ dist/ 산출물 정리"
@@ -298,6 +301,14 @@ build: toolchain-check
 	@mkdir -p dist
 	$(FASM) "$(SRC_MAIN)" "$(EXE)"
 	@$(MAKE) --no-print-directory size
+
+# ── 릴리즈: 빌드 → exact-fill 패딩(lore 임베드) → 정확히 1,474,560B 검증 ──
+# 개발 중엔 build(패딩 없이 빠르게), 제출물은 release.
+release: build
+	@python3 tools/pad-to-size.py
+	@$(MAKE) --no-print-directory release-check
+	@python3 tools/verify-pe.py "$(EXE)"
+	@echo "[release] $(EXE) = 정확히 $(DIST_LIMIT) B, 유효 PE — 제출 준비 완료"
 
 # ── 용량 ───────────────────────────────────────────────
 size:

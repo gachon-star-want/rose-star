@@ -2,6 +2,24 @@
 
 컴퓨터를 껐다가 다시 켠 뒤, 이 프로젝트를 바로 이어가기 위한 명령어와 시작 프롬프트다.
 
+## ★ 빌드 완성 상태 (2026-06-15) — 풀빌드 6단계 완료
+
+브랜치 `build/full-game`에서 전체 게임 구현 완료. 헤드리스(맥) 검증 전부 그린:
+- **Phase 1 코어**: 타워 선택(Tab/1~5/팔레트 클릭)·5종 렌더·쉬움/어려움·Easy 수입. + `draw_enemies` 무한루프 치명버그 수정(D081).
+- **Phase 2 스프라이트**: `png-to-sprite.py`→`sprites.inc`(4bpp)·`blit_sprite`. 타워5·적8·장미 실제 스프라이트(D082).
+- **Phase 3 서사+폰트**: 폰트 더미→실제 한글 글리프(AppleSDGothicNeo 12×12)·`gen_story.py`→6장면·GS_STORY 흐름(D083).
+- **Phase 4 밸런스**: 44해넘이 전부 Hard 클리어 하네스 검증 LOCKED(D084).
+- **Phase 5 보너스**: Endless(점등인의 별, escalate)·Random(사막의 신기루, 템플릿 절차생성)(D085).
+- **Phase 6 릴리즈**: `make release`→`dist/rose-star.exe` **정확히 1,474,560 B**(exact-fill, 유효 PE).
+
+검증: `make smoke` · `make harness-all`(44) · `make harness-mech`(10) · `make render-test`/`render-test-loss` 전부 통과.
+
+**남은 단 하나 = 실제 Windows 런타임 검증**: `make release`로 빌드한 exe를 Windows(VM/PC)에서
+`docs/17-windows-runtime-check.md` 체크리스트로 1회 확인(창·색·입력·플레이·서사·보너스). 맥(arm)에선 x86 PE 실행 불가.
+
+---
+
+
 ## Terminal Command
 
 터미널을 열고 아래 명령을 실행한다.
