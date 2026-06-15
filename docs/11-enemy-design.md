@@ -38,20 +38,38 @@
 - 적이 장미에 닿으면 `장미 꽃잎`이 1장 감소한다.
 - 적 처치 시 소량의 별빛을 지급한다.
 
-## 기본 수치 초안
+## 확정 스탯 테이블 (고정소수점, AI 구현 스펙)
 
-| 적 | HP | Speed | Reward | Leak Damage | Body | Flags |
-| --- | ---: | ---: | ---: | ---: | --- | --- |
-| 🌱싹 | 2 | 1.40 | 1 | 1 | Baobab | FAST |
-| 🌿새싹 | 4 | 1.00 | 2 | 1 | Baobab | none |
-| 🪴묘목 | 9 | 0.70 | 4 | 1 | Baobab | HEAVY |
-| 🌳거목 | 18 | 0.45 | 7 | 2 | Baobab(Large) | ARMORED |
-| 🐍뱀 | 4 | 1.70 | 4 | 2 | Snake | FAST, EVADE |
-| 🎩허영쟁이 | 8 | 0.80 | 4 | 1 | Human | AURA |
-| 💼사업가 | 7 | 0.85 | 0 | 1 | Human | NO_REWARD |
-| 🍷술꾼 | 6 | 0.90 | 3 | 1 | Human | ERRATIC |
+수치는 **확정값**이다(설계 결정, 시뮬 불필요 — D079). 구현자는 이 표를 그대로 `enemy_def` 배열에 넣는다. 재유도해서 어긋나지 않도록 변환 공식을 한 번만 보인다.
 
-`Speed`는 기준 속도 배율이다. 실제 구현에서는 고정소수점 정수로 바꾼다. 거목 보스(4-11)는 같은 바디에 HP/크기만 스케일한다.
+### 속도 변환 공식 (1회 명시)
+
+```text
+speed_fx = round( mult × 30 px/s ÷ 60 fps × 256 )
+         = round( mult × 128 )      ; 픽셀좌표는 ×256 고정소수점(game_defs.inc)
+```
+
+검산: 싹 `1.40 × 128 = 179.2 → 179` = 현 `SPROUT_SPEED`(✓ 1-1 하네스 검증분). 나머지 7종도 동일 공식으로 산출한 정수만 싣는다.
+
+### enemy_def 확정값
+
+| 적 | 상수 prefix | HP | mult | **speed_fx** | Reward | Leak | body_id | palette_id | flags |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |
+| 🌱싹 | `EN_SPROUT` | 2 | 1.40 | **179** | 1 | 1 | 0 BAOBAB | 0 SPROUT | `FAST` |
+| 🌿새싹 | `EN_SEEDLING` | 4 | 1.00 | **128** | 2 | 1 | 0 BAOBAB | 1 SEEDLING | — |
+| 🪴묘목 | `EN_SAPLING` | 9 | 0.70 | **90** | 4 | 1 | 0 BAOBAB | 2 SAPLING | `HEAVY` |
+| 🌳거목 | `EN_TREE` | 18 | 0.45 | **58** | 7 | 2 | 0 BAOBAB | 3 TREE | `ARMORED` |
+| 🐍뱀 | `EN_SNAKE` | 4 | 1.70 | **218** | 4 | 2 | 1 SNAKE | 4 SNAKE | `FAST` `EVADE` |
+| 🎩허영쟁이 | `EN_VAIN` | 8 | 0.80 | **102** | 4 | 1 | 2 HUMAN | 5 VAIN | `AURA` |
+| 💼사업가 | `EN_BIZ` | 7 | 0.85 | **109** | 0 | 1 | 2 HUMAN | 6 BIZ | `NO_REWARD` |
+| 🍷술꾼 | `EN_DRUNK` | 6 | 0.90 | **115** | 3 | 1 | 2 HUMAN | 7 DRUNK | `ERRATIC` |
+
+- **body_id 3개**(리소스 원칙): 0=Baobab, 1=Snake, 2=Human. 바오밥 4단계는 같은 body_id 0 + palette_id 0~3 + 렌더 크기 차이로 구분(새 바디 아님).
+- **palette_id**: 0~7, 각 적 고유 팔레트(asm 렌더러 팔레트 결정 시 hex 확정 — D078 연기분과 동일 시점).
+- **렌더 크기**(아래-중앙 앵커, D076 24px 기준, 시뮬 무관 cosmetic): 싹 16 / 새싹 20 / 묘목 22 / 거목 26(Large) / 뱀·허영쟁이·사업가·술꾼 24.
+- **거목 보스(4-11)**: 같은 body_id 0 + palette_id 3, HP·렌더크기만 스케일(§보스). 새 적 정의 아님.
+- **Leak**: 장미 도달 시 꽃잎 감소량. 🌳거목·🐍뱀만 2, 나머지 1(D063).
+- flags 정의·알고리즘은 §플래그 알고리즘.
 
 ## 적별 디자인
 
@@ -168,6 +186,49 @@
 - Human 바디, 흔들리는 2프레임
 - 붉은/탁한 팔레트
 
+## 보스 — 거대 거목 (4-11, 확정 알고리즘)
+
+44번째 해넘이의 최종 시험. **새 적이 아니라 거목(`EN_TREE`)의 스케일 변종**이다 — 같은 body_id 0 + palette_id 3, HP·렌더크기·페이즈만 추가. `is_boss` 비트로 구분.
+
+### 보스 스탯 (`EN_TREE_BOSS`)
+
+| 항목 | 값 | 비고 |
+| --- | ---: | --- |
+| HP | **120** | 거목(18)의 약 6.7배 |
+| speed_fx | 58 | 거목과 동일(mult 0.45) |
+| Reward | 50 | 처치 = 사실상 클리어 |
+| Leak | **5** | 장미 도달 시 꽃잎 5 = 즉시 패배 → 절대 통과 금지 |
+| body_id / palette_id | 0 / 3 | 거목과 동일 리소스 |
+| 렌더 크기 | 40px(약 2.5타일) | 아래-중앙 앵커, 위로 오버플로우 |
+| flags | `HEAVY` `ARMORED` `is_boss` | ARMORED = 받는 피해 -1 |
+
+### 페이즈 (HP 임계 = 결정론적 호위 소환)
+
+보스는 단독으로 등장하지 않는다. 체력이 임계를 *처음 넘어 내려갈 때* 호위 무리를 소환한다. RNG 없음(임계 비교만) → 하네스·리플레이 동일.
+
+```text
+boss_thresholds = [90, 60, 30]            ; 75% / 50% / 25%
+boss_phase = 0                            ; init_level에서 0
+
+boss_tick(boss):                          ; fire_tick 직후, winloss 전 (docs/18)
+    if not boss.is_boss: return
+    while boss_phase < 3 and boss.hp <= boss_thresholds[boss_phase]:
+        spawn_burst(BOSS_ESCORT[boss_phase])   ; 아래 표, 경로 시작점에 즉시 투입
+        boss_phase += 1
+```
+
+| boss_phase | 트리거 | 호위 소환 |
+| --- | --- | --- |
+| 0→1 | HP ≤ 90 | 🌱싹 ×4 |
+| 1→2 | HP ≤ 60 | 🌿새싹 ×3 |
+| 2→3 | HP ≤ 30 | 🪴묘목 ×2 + 🐍뱀 ×1 |
+
+호위는 §스폰 예산 밖의 보너스 투입이며, MAX_ENEMIES(16) 안에서 free 슬롯에만 들어간다(가득이면 그 마리는 스킵 — 결정론 유지). 승리 판정은 `to_spawn==0 && active_count==0`이라 보스+모든 호위 처치 시 성립.
+
+### 보스 등장 시퀀스 (4-11)
+
+선(先) 호위 웨이브(§44 표 4-11 행)로 자원·배치를 소진시킨 뒤 마지막에 보스 1마리 스폰. 보스 단독 칸이 아니라 "긴 호위전 → 보스" 구조라 모든 타워/적 종합 시험이 된다.
+
 ## 웨이브 조합 원칙
 
 - 한 웨이브는 1~2종의 적만 사용한다.
@@ -190,14 +251,92 @@ enemy_def:
   flags
 ```
 
-추천 flags:
+## 플래그 알고리즘 (확정 — 모호어 제거)
 
-| Flag | 의미 |
-| --- | --- |
-| `ENEMY_FAST` | 빠른 적 |
-| `ENEMY_HEAVY` | 높은 체력 |
-| `ENEMY_ARMORED` | 강공격 유도 |
-| `ENEMY_EVADE` | 사거리 회피 (뱀) |
-| `ENEMY_AURA` | 주변 적 강화 (허영쟁이) |
-| `ENEMY_NO_REWARD` | 처치 보상 없음 (사업가) |
-| `ENEMY_ERRATIC` | 불규칙 이동 + 슬로우/예측 저항 (술꾼) |
+각 flag는 1비트다. `flags` 바이트로 묶는다. **모호한 한국어("교란/회피/불규칙")는 아래 정확한 메커닉으로 못박는다.** 적용 시점은 모두 docs/18 §전체 틱 순서를 따른다.
+
+```text
+ENEMY_FAST     = 0x01   ; 표식만(speed_fx에 이미 반영). 렌더 잔상 2px 허용. 시뮬 효과 없음.
+ENEMY_HEAVY    = 0x02   ; 표식만(HP에 이미 반영). 슬로우 저항 없음. 렌더 큰 크기.
+ENEMY_ARMORED  = 0x04   ; 피해 경감: 받는 데미지에서 1 차감(최소 1). 거목 전용.
+ENEMY_EVADE    = 0x08   ; 사거리 회피(뱀). 아래.
+ENEMY_AURA     = 0x10   ; 주변 적 강화(허영쟁이). 아래.
+ENEMY_NO_REWARD= 0x20   ; 처치해도 별빛 0(사업가). reward 필드가 이미 0이라 표식 겸 교란용.
+ENEMY_ERRATIC  = 0x40   ; 불규칙 이동 + 슬로우/예측 저항(술꾼). 아래.
+```
+
+### ENEMY_ARMORED (거목) — 피해 경감
+
+```text
+on_hit(enemy, dmg):
+    if enemy.flags & ENEMY_ARMORED: dmg = max(1, dmg - 1)
+    enemy.hp -= dmg
+```
+
+→ 양(dmg1)은 거목에 1씩만, 가로등(dmg5)은 4씩. "강공격 유도"를 수치로 고정. SPLASH 피해에도 동일 적용.
+
+> ⚠️ **sim-watch (lock 때 확인할 것, 값 잠정 유지):** 현재 damage 값에선 ARMORED -1이 약하다 — 양(dmg1)은 거목에 `max(1,0)=1`이라 *경감 0*, 화산(dmg2→1)만 절반, 가로등(dmg5→4)은 20%. 위험은 **보스(HP120)에서 양·화산이 사실상 무력화돼 가로등 단일 정답으로 쏠리는 것**(12 실패 기준 "특정 타워 하나만 정답"). 4-4·4-11 lock 시 하네스로 "양 물량+화산 splash로도 거목/보스 처치 경로가 존재"를 확인한다. 안 되면 레버(우선순위): ① ARMORED를 -1 대신 *비율 경감*(예: 받는 피해 ×3/4)으로, ② 보스 HP↓, ③ 거목 ARMORED 유지하되 보스만 비ARMORED. **지금은 값 고정, 시뮬 결과로만 변경**(D079 두 권위 원칙 — 밸런스 결과).
+
+### ENEMY_EVADE (뱀) — 사거리 회피
+
+순간이동이 아니라 **가속 회피**다(결정론 유지). 타워 사거리 안에 있는 동안만 속도가 1.5배가 된다 → 사거리 통과 시간을 줄여 "잘 안 맞는" 체감을 준다.
+
+```text
+move_tick(enemy):
+    eff_speed = enemy.speed_fx
+    if enemy.flags & ENEMY_EVADE:
+        if any_tower_in_whose_range(enemy):        ; 자기 타일이 어떤 타워 사거리(체비셰프) 안인가
+            eff_speed = enemy.speed_fx * 3 / 2     ; 218 → 327
+    eff_speed = apply_slow(enemy, eff_speed)        ; SLOW이 있으면 그 뒤 적용
+    enemy.pos += eff_speed
+```
+
+판정은 `move_tick` 안에서 그 틱의 타워 배치 기준. 순간이동·경로이탈 없음 → 하네스·PE·리플레이 동일.
+
+### ENEMY_AURA (허영쟁이) — 주변 적 강화
+
+매 틱 시작에 한 번 오라를 재계산한다(스택·시점 고정). 반경은 **체비셰프 2타일**(양 사거리와 같은 메트릭).
+
+```text
+aura_recompute():                  ; 틱 순서상 spawn 직후, move 전 (docs/18)
+    for e in active_enemies: e.aura_buff = 0          ; 매 틱 리셋(누적·영구화 금지)
+    for v in active_enemies where v.flags & ENEMY_AURA:
+        for e in active_enemies where e != v:
+            if chebyshev_tile(e, v) <= 2:
+                e.aura_buff = 1                        ; 불리언, 스택 안 함(여러 허영쟁이여도 1)
+; 효과: aura_buff==1 인 적은 그 틱 받는 피해 -1(최소 1).
+; 자기 버프 금지(e != v)지만 허영쟁이 둘이 서로 사거리 안이면 상호 버프됨(각자 상대가 v). 의도된 동작.
+on_hit(enemy, dmg):
+    if enemy.aura_buff: dmg = max(1, dmg - 1)
+    ... (ARMORED와 합산: 둘 다면 -2, 최소 1)
+```
+
+→ "주변을 강하게"를 *받는 피해 -1*로 고정. 허영쟁이를 먼저 처치하면 그 틱부터 버프 소멸 → "우선 처치" 판단이 수치로 성립.
+
+### ENEMY_NO_REWARD (사업가) — 경제 교란
+
+```text
+on_kill(enemy):
+    if enemy.flags & ENEMY_NO_REWARD: gain = 0
+    else: gain = enemy.reward            ; 단, kill_reward_mul 해넘이 배율 적용(§경제)
+    starlight += gain
+```
+
+추가 교란 없음(별빛 *차감*은 안 함 — 음수 자원/하네스 복잡도 회피). "보상 0"만으로 *처치 우선순위를 왜곡*하는 변칙(딜을 사업가에 쏟으면 손해)이 성립. NO_REWARD는 reward=0과 중복이지만, 타게팅 AI/토스트가 "이 적은 무보상"을 읽는 표식으로도 쓴다.
+
+### ENEMY_ERRATIC (술꾼) — 결정론적 불규칙 이동
+
+**진짜 난수 금지**(Record Code 리플레이 + 헤드리스 하네스가 깨짐). 시드 PRNG(docs/18 §PRNG)로 결정론적 흔들림을 만든다. 경로는 벗어나지 않고 **경로 진행 속도만** ±흔들린다(전후 비틀거림).
+
+```text
+move_tick(enemy):                  ; ERRATIC 분기
+    r = prng_next() & 63           ; 0..63, 전역 시드 스트림(틱·적 순서 결정)
+    jitter = (r - 32)              ; -32..+31
+    eff_speed = enemy.speed_fx + jitter      ; 115 ± ~32, 음수면 그 틱 정지(클램프 0)
+    if eff_speed < 0: eff_speed = 0
+    ; SLOW 저항: 술꾼에겐 SLOW 효과 1/2만 적용
+    eff_speed = apply_slow(enemy, eff_speed, resist=true)
+    enemy.pos += eff_speed
+```
+
+"예측사격 저항"은 우리 타게팅이 *현재 위치* 기준이라 자동 성립(리드샷 안 씀). "슬로우 저항"은 `resist=true`로 SLOW 절반. 모든 무작위성은 시드 스트림 1개에서 나와 완전 재현 가능.
