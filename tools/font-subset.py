@@ -1,11 +1,30 @@
 #!/usr/bin/env python3
-"""
-tools/font-subset.py — docs/09 UI 문자열에서 고유 음절 추출 → 비트맵 폰트 .inc 생성
-사용: python3 tools/font-subset.py [--output src/font_data.inc]
-"""
-import sys, os, re
+# -*- coding: utf-8 -*-
+"""tools/font-subset.py — 게임 표면 문자열의 고유 음절을 실제 한글 TTF로 12×12 1bpp
+글리프로 래스터화해 src/font_data.inc 생성.
 
-# docs/09 UI 문자열 (확정 + 새 문자열 포함)
+docs/09 UI 표 + 서사 문안(도입/막간3/엔딩2)에서 음절을 모은다. (D061/D068/D080)
+글리프 = 실제 폰트(AppleSDGothicNeo)를 12×12에 맞춰 임계화 → draw_char 규약과 일치:
+  행당 12비트(bit11=좌측 col0), byte0=(v>>4), byte1=(v<<4)&0xF0. 글리프당 24B.
+사용: python3 tools/font-subset.py [--output src/font_data.inc] [--preview build/font.png]
+"""
+import os
+import sys
+
+from PIL import Image, ImageDraw, ImageFont
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gen_story import STORY_SCENES  # 서사 음절 단일 소스
+
+FONT_CANDS = [
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+    "/Library/Fonts/AppleGothic.ttf",
+]
+RENDER_SIZE = 16   # 큰 사이즈로 렌더 후 12×12로 축소(더 또렷)
+THRESH = 96
+
+# ── docs/09 UI 문자열 (확정, D061/D062/D080) ──
 UI_STRINGS = [
     "어린왕자: 장미의 별",
     "아무 키나 누르면 시작한다",
@@ -21,117 +40,134 @@ UI_STRINGS = [
     "별을 지켰다", "별이 어두워졌다",
     "달이 하나 저물었다", "오늘도 별은 무사하다",
     "카드를 남겼다", "카드를 남기지 못했다",
-    # 새 문자열 (D080)
     "다음 무리", "멈췄다", "다시 시작", "이어하기",
     "기록 코드를 넣으면 이어갈 수 있다",
     "코드가 맞지 않는다",
     "N달 N해넘이까지 클리어한 기록",
     "별빛이 N 왔다",
     "새로 시작",
+    "점등인의 별", "사막의 신기루",
 ]
 
-def extract_syllables(strings):
-    syllables = set()
-    for s in strings:
-        for ch in s:
-            cp = ord(ch)
-            if 0xAC00 <= cp <= 0xD7A3:  # 한글 음절
-                syllables.add(ch)
-    return sorted(syllables)
+# ── 서사 문안 (도입/막간1~3/엔딩2) — gen_story.STORY_SCENES 단일 소스 ──
+NARRATIVE_STRINGS = [ln for scene in STORY_SCENES for ln in scene]
 
-def decompose_hangul(syllable):
-    """한글 음절 → (초성, 중성, 종성) 인덱스"""
-    cp = ord(syllable) - 0xAC00
-    jong = cp % 28
-    jung = (cp // 28) % 21
-    cho  = cp // 28 // 21
-    return cho, jung, jong
+ASCII_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZcs[]:-/ .,"
 
-# 12×12 한글 비트맵 생성 (단순화된 형태 — 실제론 폰트 데이터 필요)
-# 여기서는 구조를 잡고, 실제 픽셀은 임시로 채움 (추후 진짜 폰트로 교체)
-def make_dummy_glyph_12x12(syllable):
-    """12×12 1bpp 글리프 24바이트 생성 (임시)"""
-    cho, jung, jong = decompose_hangul(syllable)
-    bitmap = []
-    for row in range(12):
-        # 단순 패턴: 초성/중성/종성 구역별 선 그리기
-        if row < 5:     # 초성 구역
-            mask = (0b111111000000 >> (cho % 6)) & 0xFFF
-        elif row < 9:   # 중성 구역
-            mask = (0b100000100000 >> (jung % 3)) & 0xFFF
-        else:           # 종성 구역
-            mask = (0b111100000000 >> (jong % 4)) & 0xFFF if jong else 0
-        # 12비트 → 2바이트 (상위 4비트 0 패딩)
-        bitmap.append((mask >> 4) & 0xFF)
-        bitmap.append((mask << 4) & 0xF0)
-    return bytes(bitmap)
 
-def make_ascii_glyph_12x12(ch):
-    """ASCII 문자 12×12 1bpp (단순 박스)"""
+def find_font():
+    for c in FONT_CANDS:
+        if os.path.exists(c):
+            return c
+    raise SystemExit("한글 TTF를 찾지 못함: " + ", ".join(FONT_CANDS))
+
+
+def extract_hangul(strings):
+    s = set()
+    for st in strings:
+        for ch in st:
+            if 0xAC00 <= ord(ch) <= 0xD7A3:
+                s.add(ch)
+    return sorted(s)
+
+
+def render_rows(ch, fnt):
+    """ch → 12행 × 12비트(bit11=좌측). 실제 폰트 래스터화 후 12×12 맞춤."""
     if ch == ' ':
-        return bytes(24)
-    # 단순히 문자 코드 기반 패턴
-    bitmap = []
-    code = ord(ch)
-    for row in range(12):
-        if row == 0 or row == 11:
-            mask = 0b111111110000
-        elif row == 6:
-            mask = 0b100000010000 if (code & 0x40) else 0b111111110000
-        else:
-            bit = (code >> (row % 7)) & 1
-            mask = (0b100000000000 | (bit << 4))
-        bitmap.append((mask >> 4) & 0xFF)
-        bitmap.append((mask << 4) & 0xF0)
-    return bytes(bitmap)
+        return [0] * 12
+    C = 28
+    img = Image.new("L", (C, C), 0)
+    d = ImageDraw.Draw(img)
+    d.text((C // 2, C // 2), ch, font=fnt, fill=255, anchor="mm")
+    bbox = img.getbbox()
+    if bbox is None:
+        return [0] * 12
+    crop = img.crop(bbox)
+    w, h = crop.size
+    scale = min(12.0 / w, 12.0 / h)
+    nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+    crop = crop.resize((nw, nh), Image.LANCZOS)
+    g = Image.new("L", (12, 12), 0)
+    g.paste(crop, ((12 - nw) // 2, (12 - nh) // 2))
+    px = g.load()
+    rows = []
+    for y in range(12):
+        v = 0
+        for x in range(12):
+            if px[x, y] >= THRESH:
+                v |= (1 << (11 - x))
+        rows.append(v)
+    return rows
 
-def gen_font_inc(output_path):
-    syllables = extract_syllables(UI_STRINGS)
 
-    # ASCII 서브셋
-    ascii_chars = list("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZcs[ ]:-/ ")
+def rows_to_bytes(rows):
+    out = []
+    for v in rows:
+        out.append((v >> 4) & 0xFF)
+        out.append((v << 4) & 0xF0)
+    return out
+
+
+def main():
+    out = "src/font_data.inc"
+    preview = None
+    if "--output" in sys.argv:
+        out = sys.argv[sys.argv.index("--output") + 1]
+    if "--preview" in sys.argv:
+        preview = sys.argv[sys.argv.index("--preview") + 1]
+
+    font_path = find_font()
+    fnt = ImageFont.truetype(font_path, RENDER_SIZE)
+
+    hangul = extract_hangul(UI_STRINGS + NARRATIVE_STRINGS)
+    ascii_chars = sorted(set(ASCII_CHARS), key=ord)
+    # codepoint 오름차순 정렬 (draw_char 이진탐색 전제) — ASCII < 한글
+    glyphs = []
+    for ch in ascii_chars:
+        glyphs.append((ord(ch), ch))
+    for ch in hangul:
+        glyphs.append((ord(ch), ch))
+    glyphs.sort(key=lambda t: t[0])
 
     lines = [
         "; font_data.inc — 비트맵 폰트 서브셋 (12×12 1bpp, 24B/글리프)",
-        "; 자동 생성: tools/font-subset.py",
-        f"; 한글: {len(syllables)}자, ASCII: {len(ascii_chars)}자",
+        "; 자동 생성: tools/font-subset.py (실제 TTF 래스터화, 직접 편집 금지)",
+        f"; 한글 {len(hangul)}자 + ASCII {len(ascii_chars)}자 = {len(glyphs)}글리프",
         "",
-        f"FONT_GLYPH_COUNT = {len(syllables) + len(ascii_chars)}",
+        f"FONT_GLYPH_COUNT = {len(glyphs)}",
         "FONT_GLYPH_BYTES = 24",
         "",
-        "; 글리프 테이블: [codepoint_u16(2B)][bitmap(24B)] × N",
+        "; 글리프 테이블: [codepoint_u16(2B)][bitmap(24B)] × N, codepoint 오름차순",
         "font_glyph_table:",
     ]
-
-    # 한글 (정렬 순서 = 코드포인트 오름차순)
-    for syl in syllables:
-        cp = ord(syl)
-        glyph = make_dummy_glyph_12x12(syl)
-        hex_bytes = ', '.join(f'0x{b:02X}' for b in glyph)
-        lines.append(f"    dw 0x{cp:04X}  ; '{syl}'")
-        lines.append(f"    db {hex_bytes}")
-
-    # ASCII
-    for ch in sorted(set(ascii_chars), key=ord):
-        cp = ord(ch)
-        glyph = make_ascii_glyph_12x12(ch)
-        hex_bytes = ', '.join(f'0x{b:02X}' for b in glyph)
-        disp = ch if ch.isprintable() and ch != "'" else f'#{cp}'
+    for cp, ch in glyphs:
+        b = rows_to_bytes(render_rows(ch, fnt))
+        disp = ch if (ch.isprintable() and ch not in "';") else f"#{cp}"
         lines.append(f"    dw 0x{cp:04X}  ; '{disp}'")
-        lines.append(f"    db {hex_bytes}")
+        lines.append("    db " + ", ".join(f"0x{x:02X}" for x in b))
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[font-subset] {len(hangul)} 한글 + {len(ascii_chars)} ASCII → {out}  (폰트: {os.path.basename(font_path)})")
 
-    lines.append("")
-    lines.append(f"; 총 {len(syllables) + len(ascii_chars)}글리프 × 26B = {(len(syllables)+len(ascii_chars))*26}B")
+    if preview:
+        # 미리보기: 글리프를 격자로 12×12씩 배치(×4 확대)
+        cols = 24
+        rows_n = (len(glyphs) + cols - 1) // cols
+        scale = 4
+        canvas = Image.new("RGB", (cols * 13 * scale, rows_n * 13 * scale), (10, 14, 30))
+        dr = ImageDraw.Draw(canvas)
+        for i, (cp, ch) in enumerate(glyphs):
+            gr = render_rows(ch, fnt)
+            cx, cy = (i % cols) * 13 * scale, (i // cols) * 13 * scale
+            for y in range(12):
+                for x in range(12):
+                    if gr[y] & (1 << (11 - x)):
+                        dr.rectangle([cx + x * scale, cy + y * scale,
+                                      cx + x * scale + scale - 1, cy + y * scale + scale - 1],
+                                     fill=(255, 230, 160))
+        canvas.save(preview)
+        print(f"[font-subset] 미리보기 → {preview}")
 
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
 
-    print(f"[font-subset] {len(syllables)} 한글 + {len(ascii_chars)} ASCII → {output_path}")
-    print(f"[font-subset] 한글 음절: {''.join(syllables)}")
-
-if __name__ == '__main__':
-    out = 'src/font_data.inc'
-    if '--output' in sys.argv:
-        idx = sys.argv.index('--output')
-        out = sys.argv[idx+1]
-    gen_font_inc(out)
+if __name__ == "__main__":
+    main()

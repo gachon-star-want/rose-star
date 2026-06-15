@@ -29,6 +29,7 @@ GS_LOST   = 2
 GS_TITLE      = 3
 GS_PAUSE      = 4
 GS_CODE_INPUT = 5
+GS_STORY      = 6                ; 서사 장면 (main.asm 전용 — render_story로 그림)
 
 ; ── 타워 type ID ──────────────────────────────────────
 TW_NONE    = 0

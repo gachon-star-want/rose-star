@@ -139,6 +139,7 @@ CLICK_SHIFT    = 6
   game_state   dd ?
   cur_level_idx dd 0
   cur_level_mask dd 0            ; 현재 해넘이 tower_mask (타워 선택 게이팅)
+  story_id      dd 0            ; 현재 서사 장면 (0=도입 1~3=막간 4=엔딩승 5=엔딩패)
   share_dir    db 'share', 0
   fmt_filepath db 'share/%s.bmp', 0
   share_filepath db 128 dup(0)
@@ -183,6 +184,7 @@ CLICK_SHIFT    = 6
 include 'game.inc'
 include 'font_data.inc'
 include 'level_data.inc'
+include 'story_data.inc'
 
 start:
         invoke  GetModuleHandle, 0
@@ -248,6 +250,9 @@ start:
         invoke  DispatchMessage, msg
         jmp     .loop
   .render:
+        ; 서사 장면이면 update/world 건너뛰고 장면만 그린다
+        cmp     dword [game_state], GS_STORY
+        je      .render_story_only
         ; 일시정지 중엔 update 스킵 (입력만 처리됨)
         cmp     dword [game_state], GS_PAUSE
         je      .skip_update
@@ -280,6 +285,11 @@ start:
         jne     .no_save_overlay
         stdcall draw_hud_text, card_str_save_fail+1, 11, 62, 110, C_LOSS
   .no_save_overlay:
+        call    Present
+        invoke  Sleep, 16
+        jmp     .loop
+  .render_story_only:
+        stdcall render_story
         call    Present
         invoke  Sleep, 16
         jmp     .loop
@@ -896,6 +906,42 @@ proc apply_easy_income
         ret
 endp
 
+; 서사 장면 진입 (id 설정 후 GS_STORY).
+proc enter_story, id
+        mov     eax, [id]
+        mov     [story_id], eax
+        mov     dword [game_state], GS_STORY
+        ret
+endp
+
+; 서사 장면 종료 후 다음 행동 (story_id에 따라):
+;   0 도입 → 1-1 / 1~3 막간 → 다음 달 첫 해넘이 / 4·5 엔딩 → 타이틀
+proc advance_after_story
+        mov     eax, [story_id]
+        test    eax, eax
+        jz      .intro
+        cmp     eax, 1
+        je      .m2
+        cmp     eax, 2
+        je      .m3
+        cmp     eax, 3
+        je      .m4
+        mov     dword [game_state], GS_TITLE    ; 엔딩(4/5) → 타이틀
+        ret
+  .intro:
+        stdcall enter_level, 0
+        ret
+  .m2:
+        stdcall enter_level, 11
+        ret
+  .m3:
+        stdcall enter_level, 22
+        ret
+  .m4:
+        stdcall enter_level, 33
+        ret
+endp
+
 ; render_world 위에 그리는 플랫폼 오버레이:
 ;   GS_PLAY/PAUSE → 잠긴 타워 칩 덧칠(cur_level_mask) + 선택 타워 비용(HUD 빈칸)
 ;   GS_TITLE      → 쉬움/어려움 모드 선택 표시
@@ -951,6 +997,45 @@ proc draw_overlays uses eax ecx edx
         ret
 endp
 
+; 서사 장면 그리기: story_id 장면의 줄들을 화면 중앙에 한 줄씩(절제·서정, docs/09).
+;   장면 데이터 = story_data.inc (gen_story.py). 한 키 입력으로 진행(WindowProc).
+proc render_story uses eax ebx ecx edx esi edi
+        stdcall fill_rect, 0, 0, FB_W, FB_H, C_GROUND
+        mov     eax, [story_id]
+        shl     eax, 3                          ; *8 (ptr,count)
+        mov     esi, [story_scene_table + eax]          ; 줄 데이터 ptr
+        mov     edi, [story_scene_table + eax + 4]      ; 줄 수
+        ; 세로 중앙: y0 = (FB_H - count*16)/2
+        mov     eax, edi
+        shl     eax, 4
+        mov     ebx, FB_H
+        sub     ebx, eax
+        shr     ebx, 1
+        mov     [r_py], ebx
+        xor     ecx, ecx
+  .line:
+        cmp     ecx, edi
+        jge     .done
+        movzx   eax, byte [esi]                 ; len
+        ; x = (FB_W - len*13)/2
+        mov     ebx, eax
+        imul    ebx, 13
+        mov     edx, FB_W
+        sub     edx, ebx
+        shr     edx, 1
+        push    ecx edi esi
+        lea     ebx, [esi+1]
+        stdcall draw_hud_text, ebx, eax, edx, [r_py], C_TEXT
+        pop     esi edi ecx
+        movzx   eax, byte [esi]
+        lea     esi, [esi + 1 + eax*2]
+        add     dword [r_py], 16
+        inc     ecx
+        jmp     .line
+  .done:
+        ret
+endp
+
 ; ── 윈도우 프로시저 ──
 proc WindowProc, hw, wmsg, wparam, lparam
         mov     eax, [wmsg]
@@ -975,6 +1060,12 @@ proc WindowProc, hw, wmsg, wparam, lparam
         stdcall set_cursor_from_lparam, [lparam]
         jmp     .zero
   .lbtn:
+        ; 서사 장면 중 클릭 → 진행
+        cmp     dword [game_state], GS_STORY
+        jne     .lbtn_play_input
+        call    advance_after_story
+        jmp     .zero
+  .lbtn_play_input:
         ; HUD 행(상단)에서 타워 팔레트 클릭이면 종류 선택, 아니면 설치 의도.
         mov     eax, [lparam]
         movzx   ecx, ax                         ; client x
@@ -1007,8 +1098,13 @@ proc WindowProc, hw, wmsg, wparam, lparam
         ; GS_CODE_INPUT 전용 키 처리
         cmp     dword [game_state], GS_CODE_INPUT
         je      .kcode_dispatch
+        ; GS_STORY: 아무 키나 진행(ESC는 종료)
+        cmp     dword [game_state], GS_STORY
+        je      .kstory
         cmp     eax, VK_ESCAPE
         je      .destroy
+        cmp     eax, VK_RETURN
+        je      .kplace
         cmp     eax, VK_RETURN
         je      .kplace
         cmp     eax, VK_LEFT
@@ -1045,6 +1141,11 @@ proc WindowProc, hw, wmsg, wparam, lparam
         jmp     .zero
   .ktab:
         call    cycle_tower
+        jmp     .zero
+  .kstory:
+        cmp     eax, VK_ESCAPE
+        je      .destroy
+        call    advance_after_story
         jmp     .zero
   .kcode_dispatch:
         ; GS_CODE_INPUT: ESC→타이틀, ENTER→decode, BACKSPACE→삭제
@@ -1148,24 +1249,38 @@ proc WindowProc, hw, wmsg, wparam, lparam
         inc     dword [in_cursor_cy]
         jmp     .zero
   .kplace:
-        ; GS_TITLE → 레벨 0부터 새로 시작
+        ; GS_TITLE → 도입 서사 후 1-1
         cmp     dword [game_state], GS_TITLE
         jne     .kplace_notatitle
-        stdcall enter_level, 0
+        stdcall enter_story, 0
         jmp     .zero
   .kplace_notatitle:
-        ; GS_WON → 다음 레벨로 진행
+        ; GS_WON → 막간/엔딩 분기 또는 다음 해넘이
         cmp     dword [game_state], GS_WON
         jne     .kplace_notwon
         mov     eax, [cur_level_idx]
         cmp     eax, 43
-        jge     .kplace_endgame
+        jge     .kplace_endgame                 ; 4-11 → 엔딩
+        cmp     eax, 10
+        je      .kplace_inter1                  ; 1-11 클리어 → 막간1
+        cmp     eax, 21
+        je      .kplace_inter2                  ; 2-11 → 막간2
+        cmp     eax, 32
+        je      .kplace_inter3                  ; 3-11 → 막간3
         inc     dword [cur_level_idx]
         stdcall enter_level, [cur_level_idx]
         jmp     .zero
   .kplace_endgame:
-        ; 4-11 클리어 → 타이틀로
-        mov     dword [game_state], GS_TITLE
+        stdcall enter_story, 4                  ; 승리 엔딩
+        jmp     .zero
+  .kplace_inter1:
+        stdcall enter_story, 1
+        jmp     .zero
+  .kplace_inter2:
+        stdcall enter_story, 2
+        jmp     .zero
+  .kplace_inter3:
+        stdcall enter_story, 3
         jmp     .zero
   .kplace_notwon:
         ; GS_PLAY → 타워 설치 의도
