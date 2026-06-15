@@ -30,6 +30,7 @@
 | [13-agent-skill-workflow.md](13-agent-skill-workflow.md) | 로컬 agent skills 사용 전략과 Matt Pocock 계열 스킬 운영 방식 |
 | [14-resume-session.md](14-resume-session.md) | 재부팅/새 세션 뒤 바로 이어가기 위한 터미널 명령과 시작 프롬프트 |
 | [15-execution-plan.md](15-execution-plan.md) | 구현 전 실행 트랙, 완료 조건, 다음 산출물 결정 |
+| [16-lore-bible.md](16-lore-bible.md) | 깊은 백그라운드 lore(빙산 수면 아래). 게임 속 노출은 09가 최소로 |
 
 ## 문서 운영 규칙
 

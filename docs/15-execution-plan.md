@@ -1,6 +1,11 @@
 # Execution Plan
 
-이 문서는 「어린왕자: 장미의 별」을 실제 완성 가능한 순서로 만들기 위한 실행 계획이다. 구현은 아직 시작하지 않고, 먼저 작업 단위와 검증 기준을 고정한다.
+이 문서는 「어린왕자: 장미의 별」을 실제 완성 가능한 순서로 만들기 위한 실행 계획이다.
+
+> **상태(2026-06-15): Track A~F 전부 완료.** 풀빌드 6단계(코어/스프라이트/서사+폰트/밸런스/보너스/릴리즈)로
+> 게임 구현·헤드리스 검증 완료(D081~D085, `docs/14` 빌드 완성 상태 참조). Track D(데이터/하네스)=44해넘이
+> `harness-all` LOCKED, Track E(콘텐츠 램프)=44해넘이 Hard 클리어 검증, Track F(릴리즈)=`make release`로
+> `dist/rose-star.exe` 정확히 1,474,560 B exact-fill. **남은 것: 실제 Windows 런타임 1회 검증(`docs/17`).**
 
 ## 계획 원칙
 
@@ -24,6 +29,8 @@
 - `make size`가 `dist/` 크기를 측정함
 - `tools/toolchain/README.md`가 FASM 버전/SHA256 기록 위치를 정의함
 
+**상태(2026-06-02): 완료.** FASM 1.73.32(Linux ELF32)를 `linux/386` Docker 컨테이너로 감싸는 래퍼(`tools/toolchain/fasm-docker.sh`)로 macOS arm64에서 Windows PE를 빌드. INCLUDE(win32ax 등)는 Windows 배포본(`fasmw17332.zip`)에서 추출, 마운트 볼륨이 APFS(대소문자 무관)라 소문자 include가 해석됨. `make toolchain-check`·`make smoke`(최소 PE 스텁 → `tools/verify-pe.py`로 MZ/PE/i386/섹션 검증) 통과. 버전·SHA256은 `tools/toolchain/README.md`.
+
 ## Track B: Win32 Framebuffer Tracer Bullet
 
 목표:
@@ -39,6 +46,8 @@
 - 프레임 카운터 또는 색상 변화로 화면 갱신을 확인함
 - `Esc`로 종료 가능
 - 파일 크기가 기록됨
+
+**상태(2026-06-02): 코드/빌드 완료 — 런타임은 Windows 환경 대기.** `src/main.asm`: 256×192 프레임버퍼(top-down DIB, biHeight=-192, 32bpp BI_RGB)를 `StretchDIBits`(nearest, HALFTONE 금지)로 client 1024×768(`AdjustWindowRect`)에 4배 출력. PeekMessage 렌더 루프 + `WM_PAINT`/`WM_KEYDOWN(ESC)`/`WM_DESTROY`. `make build` → `dist/rose-star.exe`(3072 B) 유효 PE 확인(import: gdi32/user32/kernel32). **맥(arm)에서 화면을 못 띄우므로** 프레임버퍼를 비대칭 테스트 패턴(남청+좌상단 노랑 마커+대각선)으로 채워, 후반 UTM/Parallels에서 방향·스케일·채널순서를 한눈에 검증한다. 미검증: 실제 표시/ESC 종료/프레임 갱신.
 
 ## Track C: Playable One-Sunset Loop
 
